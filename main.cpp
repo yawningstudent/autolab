@@ -93,8 +93,10 @@ int main() {
     //Server server2(connectionClientServer2, connectionServerClient2);
 
     Client client1(connectionClientServer, connectionServerClient);
-    std::shared_future<Method_Out> resFuture1(client1.method1({5}));
-    std::shared_future<Method_Out> resFuture2(client1.method2({4, 9}));
+    std::shared_future<Method_Out> resFuture11(client1.method1({5}));
+    std::shared_future<Method_Out> resFuture12(client1.method1({6}));
+    std::shared_future<Method_Out> resFuture21(client1.method2({5, 9}));
+    std::shared_future<Method_Out> resFuture22(client1.method2({7, 9}));
 
     //Client client2(connectionClientServer2, connectionServerClient2);
     //std::shared_future<Method_Out> resFuture2(client2.method2({4, 9}));

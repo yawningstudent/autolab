@@ -9,6 +9,8 @@
 #include "Buffer.h"
 #include "Connection.h"
 
+#define NUM_WORKERS 3
+
 class Receiver {
 public:
     Receiver(std::shared_ptr<Connection> &conn)
@@ -20,13 +22,23 @@ public:
         processingThread = std::thread([&] {
             processing();
         });
+
+        // Создаём пул потоков
+        workers.reserve(NUM_WORKERS);
+        for (uint32_t i = 0; i < NUM_WORKERS; ++i) {
+            workers.emplace_back(&Receiver::processing, this);
+        }
     }
 
     ~Receiver() {
         finish = true;
         cv.notify_all();
         receivingThread.join();
-        processingThread.join();
+        // Завершаем выполнение всех потоков
+        for (uint32_t i = 0; i < workers.size(); ++i) {
+            cv.notify_all();
+            workers[i].join();
+        }
     }
 
     void receiving() {
@@ -64,9 +76,11 @@ public:
                     //Requester("method1", buffer);
 
                     std::shared_ptr<Request> request(std::make_shared<Request>(id, buffer));
+
+                    std::lock_guard<std::mutex> lock(m); // Блокируем мьютекс запросов, чтобы безопасно запушить запрос
                     requests.push_back(request);
 
-                    cv.notify_all(); // Not sure that is really need
+                    cv.notify_one();
                 }
             CONTEXT_END()
         }
@@ -84,23 +98,26 @@ public:
                 {
                     std::unique_lock<std::mutex> lk(m);
                     cv.wait(lk,
-                            [this] { return !requests.empty() || finish; }
+                            [this]() { return !requests.empty() || finish; }
                     );
 
                     if (finish && requests.empty()) {
-                        //LOG(INFO) << "Exiting processor thread" << std::endl;
+                        LOG(INFO) << "Exiting processor thread" << std::endl;
                         break;
                     }
 
-                    request = requests.front();
-                    requests.pop_front();
-                    cv.notify_all(); // Not sure that is really need
+                    if (!requests.empty()) {
 
-                    //TODO Buffer to argument
-                    LOG(INFO) << "BUFFER PROCESSING" << std::endl << std::flush;
+                        request = requests.front();
+                        requests.pop_front();
+                        lk.unlock(); // Разблокируем мьютекс запросов, чтобы они могли обрабатываться параллельно
+                        //cv.notify_all(); // Not sure that is really need
 
-                    /* Run jobs in separate threads */
-                    workerThreads.emplace_back(&Receiver::doBufferProcessing, this, request->getRequestId(), request->getBuffer());
+                        //TODO Buffer to argument
+                        LOG(INFO) << "BUFFER PROCESSING" << std::endl << std::flush;
+
+                        doBufferProcessing(request->getRequestId(), request->getBuffer());
+                    }
                 }
 
 //            const Method1_In& in = request->getMethod1_In();
@@ -127,7 +144,7 @@ public:
     }
 
 private:
-    std::vector<std::thread> workerThreads;
+    std::vector<std::thread> workers; //Пул потоков
 
     std::thread processingThread;
     std::thread receivingThread;
